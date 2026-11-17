@@ -1,0 +1,140 @@
+﻿@page "/"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using main.Services
+
+<PageTitle>Home | VALOR</PageTitle>
+
+<div class="home-canvas">
+
+    <img src="images/gs-battery-icon.png" class="watermark" alt="" aria-hidden="true" />
+    <section class="modules-wrap">
+        <div class="modules-grid">
+            @foreach (var module in VisibleModules)
+            {
+                <a href="@module.Href" class="module-card">
+                    <span class="module-icon bi @module.Icon" aria-hidden="true"></span>
+                    <span class="module-label">@module.Title</span>
+                </a>
+            }
+        </div>
+    </section>
+
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    // Full catalog plus the subset the current user is allowed to see
+    private List<ModuleCard> AllModules { get; set; } = new();
+    private List<ModuleCard> VisibleModules { get; set; } = new();
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        AllModules = new List<ModuleCard>
+        {
+            new("Dashboard", "bi-grid", "dashboard", RequiresDashboardAccess: true),
+            new("Value & Agent Declaration Portal", "bi-megaphone", "declaration", RequiresDashboardAccess: false),
+        };
+
+        var authState = await AuthStateTask;
+        var canSeeDashboard = authState.User.IsInRole(Roles.DashboardAccess);
+
+        VisibleModules = AllModules
+            .Where(m => !m.RequiresDashboardAccess || canSeeDashboard)
+            .ToList();
+    }
+
+    /// Describes one navigation card on the home screen
+    private record ModuleCard(string Title, string Icon, string Href, bool RequiresDashboardAccess);
+}
+
+<style>
+    .home-canvas {
+        position: relative;
+        min-height: calc(100vh - 6rem);
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        padding: 3rem 1.5rem;
+    }
+
+    /* Big faded logo mark behind the cards */
+    .watermark {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 34rem;
+        height: auto;
+        transform: translate(-50%, -50%);
+        opacity: .1;
+        pointer-events: none;
+        user-select: none;
+    }
+
+    .modules-wrap {
+        position: relative;
+        z-index: 1;
+        width: 100%;
+    }
+
+    .modules-grid {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1.75rem;
+        max-width: 64rem;
+        margin: 0 auto;
+    }
+
+    .module-card {
+        flex: 1 1 20rem;
+        max-width: 24rem;
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+        padding: 2.75rem 2rem;
+        border-radius: 1.5rem;
+        text-decoration: none;
+        background: linear-gradient(135deg, rgba(226, 34, 46, .14), rgba(226, 34, 46, .06));
+        border: 1px solid rgba(226, 34, 46, .12);
+        box-shadow: 0 8px 24px rgba(226, 34, 46, .08);
+        transition: transform .2s ease, box-shadow .2s ease, background .2s ease;
+    }
+
+    .module-card:hover {
+        transform: translateY(-6px);
+        box-shadow: 0 18px 36px rgba(226, 34, 46, .16);
+        background: linear-gradient(135deg, rgba(226, 34, 46, .2), rgba(226, 34, 46, .09));
+    }
+
+    .module-icon {
+        flex: 0 0 auto;
+        font-size: 1.6rem;
+        color: #1a1a1a;
+    }
+
+    .module-label {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .95rem;
+        letter-spacing: .01em;
+        color: #c21f2c;
+        line-height: 1.35;
+    }
+
+    @@media (max-width: 576px) {
+        .watermark {
+            width: 20rem;
+        }
+
+        .module-card {
+            padding: 2rem 1.5rem;
+        }
+    }
+</style>

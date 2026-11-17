@@ -1,0 +1,9 @@
+﻿@* Root router *@
+<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        @* Moves keyboard focus to the page heading after navigation for
+           screen-reader and keyboard users *@
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

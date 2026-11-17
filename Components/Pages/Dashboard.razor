@@ -1,0 +1,440 @@
+﻿@page "/dashboard"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = Roles.DashboardAccess)]
+@implements IDisposable
+@using System.Globalization
+@using Microsoft.AspNetCore.Authorization
+@using main.Services
+@inject DeclarationStore DeclarationStore
+
+<PageTitle>Dashboard</PageTitle>
+
+<div class="dashboard-page">
+
+    <img src="images/gs-battery-icon.png" class="watermark" alt="" aria-hidden="true" />
+
+    <div class="dashboard-inner">
+
+        <h1 class="dashboard-title">Dashboard</h1>
+
+        <section class="dashboard-section">
+            <h2 class="section-heading">Best Agent</h2>
+            <p class="section-sub">Dihitung otomatis dari jumlah laporan yang dikirim PIC setiap bulan</p>
+
+            @if (!BestAgents.Any())
+            {
+                <div class="empty-state">Belum ada data submission</div>
+            }
+            else
+            {
+                <div class="best-agent-grid">
+                    @foreach (var month in BestAgents)
+                    {
+                        <div class="best-agent-card">
+                            <div class="best-agent-month">@FormatMonth(month.Month)</div>
+
+                            @foreach (var agent in month.TopAgents)
+                            {
+                                <div class="best-agent-name">
+                                    <span class="bi bi-trophy-fill best-agent-icon" aria-hidden="true"></span>
+                                    <span>@agent.PicName</span>
+                                </div>
+                            }
+
+                            <div class="best-agent-meta">
+                                @if (month.TopAgents.Count > 1)
+                                {
+                                    <text>Seri &mdash; </text>
+                                }
+                                @month.TopAgents[0].SubmissionCount laporan &middot; @month.TotalSubmissions total submission bulan ini
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="dashboard-section">
+            <h2 class="section-heading">Recap</h2>
+            <p class="section-sub">Jumlah seluruh laporan yang pernah dikirim tiap PIC</p>
+
+            @if (!PicTotals.Any())
+            {
+                <div class="empty-state">Belum ada data submission</div>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="submissions-table pic-totals-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>NPK</th>
+                                <th>Nama PIC</th>
+                                <th>Total Submission</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{ var rank = 0; }
+                            @foreach (var pic in PicTotals)
+                            {
+                                rank++;
+                                <tr>
+                                    <td class="cell-nowrap">@rank</td>
+                                    <td class="cell-nowrap">@pic.PicId</td>
+                                    <td class="cell-nowrap">@pic.PicName</td>
+                                    <td class="cell-nowrap pic-total-count">@pic.Count submission</td>
+                                    <td class="pic-total-bar-cell">
+                                        <div class="pic-total-bar-track">
+                                            <div class="pic-total-bar-fill" style="width:@(GetBarWidthPercent(pic.Count))%"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="dashboard-section">
+            <h2 class="section-heading">Data Value &amp; Agent Declaration</h2>
+            <p class="section-sub">@Submissions.Count submission tersimpan</p>
+
+            @if (!Submissions.Any())
+            {
+                <div class="empty-state">Belum ada submission yang masuk</div>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="submissions-table">
+                        <thead>
+                            <tr>
+                                <th>Waktu</th>
+                                <th>NPK</th>
+                                <th>Nama PIC</th>
+                                <th>Department</th>
+                                <th>Safety Declaration</th>
+                                <th>Value Declaration</th>
+                                <th>Lampiran</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in Submissions)
+                            {
+                                <tr>
+                                    <td class="cell-nowrap">@FormatTimestamp(item.SubmittedAtUtc)</td>
+                                    <td class="cell-nowrap">@item.PicId</td>
+                                    <td class="cell-nowrap">@item.PicName</td>
+                                    <td class="cell-nowrap">@item.Department</td>
+                                    <td class="cell-truncate" title="@item.SafetyDeclaration">@item.SafetyDeclaration</td>
+                                    <td class="cell-truncate" title="@item.ValueDeclaration">@item.ValueDeclaration</td>
+                                    <td class="cell-nowrap">
+                                        @if (item.PhotoFileName is not null)
+                                        {
+                                            <span class="attach-badge"><span class="bi bi-camera-fill" aria-hidden="true"></span> Foto</span>
+                                        }
+                                        @if (item.VideoFileName is not null)
+                                        {
+                                            <span class="attach-badge"><span class="bi bi-camera-video-fill" aria-hidden="true"></span> Video</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+    </div>
+</div>
+
+@code {
+    // Cached store snapshots to avoid re-querying on every render
+    private IReadOnlyList<DeclarationRecord> Submissions = Array.Empty<DeclarationRecord>();
+    private IReadOnlyList<BestAgentOfMonth> BestAgents = Array.Empty<BestAgentOfMonth>();
+    private IReadOnlyList<PicTotal> PicTotals = Array.Empty<PicTotal>();
+
+    /// Initial data load plus subscription to new submissions so the dashboard updates live as other users submit declarations
+    protected override void OnInitialized()
+    {
+        RefreshData();
+        DeclarationStore.Changed += OnStoreChanged;
+    }
+
+    /// Store change handler. The event can originate from another circuit, so the refresh is marshalled back onto this components context
+    private void OnStoreChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            RefreshData();
+            StateHasChanged();
+        });
+    }
+
+    /// Recomputes every view model from a single submissions snapshot
+    private void RefreshData()
+    {
+        Submissions = DeclarationStore.GetAll();
+        BestAgents = DeclarationStore.GetBestAgentsByMonth();
+
+        PicTotals = Submissions
+            .GroupBy(s => (s.PicId, s.PicName))
+            .Select(g => new PicTotal(g.Key.PicId, g.Key.PicName, g.Count()))
+            .OrderByDescending(p => p.Count)
+            .ThenBy(p => p.PicName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// Scales a count to a 0-100 bar width relative to the current top submitter
+    private int GetBarWidthPercent(int count)
+    {
+        var max = PicTotals.Count > 0 ? PicTotals[0].Count : 0;
+        if (max <= 0) return 0;
+        return (int)Math.Round(count * 100.0 / max);
+    }
+
+    /// Aggregated submission total for one PIC in the recap table
+    private record PicTotal(string PicId, string PicName, int Count);
+
+    /// <summary>Formats a month key as an Indonesian long month plus year.</summary>
+    private static string FormatMonth(DateOnly month) =>
+        month.ToDateTime(TimeOnly.MinValue).ToString("MMMM yyyy", CultureInfo.GetCultureInfo("id-ID"));
+
+    /// Converts a stored UTC timestamp to Western Indonesian Time (WIB) for display
+    private static string FormatTimestamp(DateTime utc)
+    {
+        TimeZoneInfo wibZone = TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
+        DateTime localTime = TimeZoneInfo.ConvertTimeFromUtc(utc, wibZone);
+        
+        return localTime.ToString("dd MMM yyyy, HH:mm", CultureInfo.GetCultureInfo("id-ID")) + " WIB";
+    }
+
+    /// Unsubscribes from the store to release the event handler
+    public void Dispose() => DeclarationStore.Changed -= OnStoreChanged;
+}
+
+<style>
+    .dashboard-page {
+        position: relative;
+        min-height: calc(100vh - 6rem);
+        padding: 2rem 1.5rem 3rem;
+        overflow: hidden;
+    }
+
+    .watermark {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 30rem;
+        height: auto;
+        transform: translate(-50%, -50%);
+        opacity: .08;
+        pointer-events: none;
+        user-select: none;
+    }
+
+    .dashboard-inner {
+        position: relative;
+        z-index: 1;
+        max-width: 72rem;
+        margin: 0 auto;
+    }
+
+    .dashboard-title {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: 1.5rem;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        color: #1a1a1a;
+        margin-bottom: 2rem;
+    }
+
+    .dashboard-section {
+        margin-bottom: 2.5rem;
+    }
+
+    .section-heading {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: 1rem;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        color: #1a1a1a;
+        margin-bottom: .3rem;
+    }
+
+    .section-sub {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .75rem;
+        color: #8a8a8a;
+        margin-bottom: 1.1rem;
+    }
+
+    .empty-state {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .85rem;
+        color: #8a8a8a;
+        background: #f5f5f5;
+        border: 1px dashed #d5d5d5;
+        border-radius: .6rem;
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    /* Best Agent cards */
+    .best-agent-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.1rem;
+    }
+
+    .best-agent-card {
+        flex: 1 1 15rem;
+        max-width: 18rem;
+        background: linear-gradient(135deg, rgba(20, 0, 245, .07), rgba(20, 0, 245, .02));
+        border: 1px solid rgba(20, 0, 245, .12);
+        border-radius: .8rem;
+        padding: 1.2rem 1.3rem;
+    }
+
+    .best-agent-month {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .72rem;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        color: #1400f5;
+        margin-bottom: .6rem;
+    }
+
+    .best-agent-name {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .9rem;
+        color: #1a1a1a;
+        margin-bottom: .2rem;
+    }
+
+    .best-agent-icon {
+        color: #e2a220;
+        font-size: .95rem;
+    }
+
+    .best-agent-meta {
+        margin-top: .6rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .7rem;
+        color: #6b6b6b;
+    }
+
+    /* Table */
+    .table-wrap {
+        overflow-x: auto;
+        border: 1px solid #e5e5e5;
+        border-radius: .8rem;
+    }
+
+    .submissions-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .78rem;
+    }
+
+    .submissions-table thead th {
+        text-align: left;
+        background: #f5f5f5;
+        color: #6b6b6b;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        font-size: .68rem;
+        padding: .7rem .9rem;
+        border-bottom: 1px solid #e5e5e5;
+        white-space: nowrap;
+    }
+
+    .submissions-table tbody td {
+        padding: .7rem .9rem;
+        border-bottom: 1px solid #f0f0f0;
+        color: #1a1a1a;
+        vertical-align: top;
+    }
+
+    .submissions-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .submissions-table tbody tr:hover {
+        background: #fafaff;
+    }
+
+    .cell-nowrap {
+        white-space: nowrap;
+    }
+
+    .cell-truncate {
+        max-width: 16rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .attach-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: .3rem;
+        background: #eef3fb;
+        color: #1400f5;
+        border-radius: .4rem;
+        padding: .2rem .5rem;
+        font-size: .68rem;
+        font-weight: 700;
+        margin-right: .3rem;
+        white-space: nowrap;
+    }
+
+    /* Per-PIC totals leaderboard */
+    .pic-totals-table td {
+        vertical-align: middle;
+    }
+
+    .pic-total-count {
+        font-weight: 700;
+        color: #1400f5;
+    }
+
+    .pic-total-bar-cell {
+        width: 40%;
+        min-width: 8rem;
+    }
+
+    .pic-total-bar-track {
+        width: 100%;
+        height: .5rem;
+        background: #f0f0f5;
+        border-radius: 999px;
+        overflow: hidden;
+    }
+
+    .pic-total-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #1400f5, #6a5bff);
+        border-radius: 999px;
+        transition: width .3s ease;
+    }
+
+    @@media (max-width: 576px) {
+        .cell-truncate {
+            max-width: 9rem;
+        }
+    }
+</style>

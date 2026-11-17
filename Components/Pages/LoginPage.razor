@@ -1,0 +1,230 @@
+﻿@page "/login"
+@layout Layout.AuthLayout
+@using System.ComponentModel.DataAnnotations
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using main.Services
+@inject UserAccountStore UserAccountStore
+@inject NavigationManager NavigationManager
+
+<PageTitle>Login | VALOR</PageTitle>
+
+<div class="auth-page">
+    <img src="images/gs-battery-icon.png" class="watermark" alt="" aria-hidden="true" />
+
+    <div class="auth-card">
+        <img src="images/gs-battery-logo.png" alt="PT. GS Battery" class="auth-logo" />
+        <h1 class="auth-title">VALUE & AGENT DECLARATION PORTAL</h1>
+
+        <EditForm Model="Model" FormName="login" OnValidSubmit="HandleLogin" method="post">
+            <DataAnnotationsValidator />
+
+            @if (ErrorMessage is not null)
+            {
+                <div class="auth-error">@ErrorMessage</div>
+            }
+
+            <div class="field-group">
+                <label class="field-label">NPK</label>
+                <InputText class="field-input" @bind-Value="Model.Nim" placeholder="NPK" autocomplete="username" />
+                <ValidationMessage For="() => Model.Nim" class="field-error" />
+            </div>
+
+            <div class="field-group">
+                <label class="field-label">Password</label>
+                <InputText class="field-input" type="password" @bind-Value="Model.Password" placeholder="Password" autocomplete="current-password" />
+                <ValidationMessage For="() => Model.Password" class="field-error" />
+            </div>
+
+            <button type="submit" class="btn-submit-full">Masuk</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    // Bound from the posted form
+    [SupplyParameterFromForm(FormName = "login")]
+    private LoginModel Model { get; set; } = default!;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string? ErrorMessage;
+
+    /// Ensures the form model exists on the initial GET
+    protected override void OnInitialized()
+    {
+        Model ??= new LoginModel();
+    }
+
+    /// Authenticates the submitted credentials and, on success, issues the auth cookie with name/department/role claims before redirecting.
+    private async Task HandleLogin()
+    {
+        var user = UserAccountStore.TryAuthenticate(Model.Nim.Trim(), Model.Password);
+        if (user is null)
+        {
+            ErrorMessage = "NPK atau password salah";
+            return;
+        }
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Nim),
+            new(ClaimTypes.Name, user.Name),
+            new("Department", user.Department),
+        };
+        claims.AddRange(user.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
+
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = new ClaimsPrincipal(identity);
+
+        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties
+        {
+            IsPersistent = true,
+            ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8),
+        });
+
+        // Fall back to the home page when no return URL was supplied
+        var target = string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : ReturnUrl;
+        NavigationManager.NavigateTo(target, forceLoad: true);
+    }
+
+    /// Credentials entered on the login form
+    private class LoginModel
+    {
+        [Required(ErrorMessage = "NPK wajib diisi")]
+        public string Nim { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Password wajib diisi")]
+        public string Password { get; set; } = string.Empty;
+    }
+}
+
+<style>
+    .auth-page {
+        position: relative;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+        padding: 1.5rem;
+        overflow: hidden;
+    }
+
+    .watermark {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 30rem;
+        height: auto;
+        transform: translate(-50%, -50%);
+        opacity: .08;
+        pointer-events: none;
+        user-select: none;
+    }
+
+    .auth-card {
+        position: relative;
+        z-index: 1;
+        width: 100%;
+        max-width: 24rem;
+        background: #fff;
+        border: 1px solid #ececec;
+        border-radius: 1rem;
+        box-shadow: 0 12px 34px rgba(20, 20, 20, .1);
+        padding: 2.25rem 2rem;
+        text-align: center;
+    }
+
+    .auth-logo {
+        height: 1.8rem;
+        margin-bottom: 1.4rem;
+    }
+
+    .auth-title {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: 1.05rem;
+        letter-spacing: .02em;
+        color: #1a1a1a;
+        margin-bottom: 1.6rem;
+    }
+
+    .field-group {
+        margin-bottom: 1.2rem;
+        text-align: left;
+    }
+
+    .field-label {
+        display: block;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .75rem;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        color: #1a1a1a;
+        margin-bottom: .4rem;
+    }
+
+    .field-input {
+        width: 100%;
+        border: 1px solid #d5d5d5;
+        border-radius: .6rem;
+        background: #fff;
+        padding: .75rem 1rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .85rem;
+        color: #1a1a1a;
+    }
+
+    .field-input:focus {
+        outline: none;
+        border-color: #1400f5;
+        box-shadow: 0 0 0 3px rgba(20, 0, 245, .12);
+    }
+
+    .field-error {
+        margin-top: .35rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .72rem;
+        color: #e2222e;
+        display: block;
+    }
+
+    .auth-error {
+        background: #fdecec;
+        border: 1px solid rgba(226, 34, 46, .25);
+        color: #c21f2c;
+        border-radius: .6rem;
+        padding: .7rem .9rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .78rem;
+        margin-bottom: 1.2rem;
+        text-align: left;
+    }
+
+    .btn-submit-full {
+        width: 100%;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .85rem;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        padding: .8rem;
+        border-radius: .6rem;
+        border: none;
+        background: #1400f5;
+        color: #fff;
+        cursor: pointer;
+        margin-top: .4rem;
+    }
+
+    .btn-submit-full:hover {
+        background: #1000c4;
+    }
+</style>

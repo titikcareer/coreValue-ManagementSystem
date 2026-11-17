@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "o23Y1zxI9qA=",
+  "success": true,
+  "projectFilePath": "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/BGuide/main/main.csproj",
+  "expectedPackageFiles": [
+    "/Volumes/flashdrive.ghxfarr/DeveloperCache/.nuget-packages/microsoft.aspnetcore.app.internal.assets/10.0.9/microsoft.aspnetcore.app.internal.assets.10.0.9.nupkg.sha512"
+  ],
+  "logs": []
+}

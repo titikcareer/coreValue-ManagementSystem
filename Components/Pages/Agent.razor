@@ -1,0 +1,696 @@
+﻿@page "/agent"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = Roles.DashboardAccess)]
+@implements IDisposable
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Authorization
+@using main.Services
+@inject AgentStore AgentStore
+
+@* Agent Management Page *@
+<PageTitle>Agent Core Value | BGuide</PageTitle>
+@if (AgentPendingDelete is not null)
+{
+    <div class="modal-backdrop-custom">
+        <div class="confirm-card">
+            <p class="confirm-text">Hapus agent <strong>@AgentPendingDelete.Name</strong> (@AgentPendingDelete.Id)?</p>
+            <div class="agent-form-actions">
+                <button type="button" class="btn-cancel" @onclick="CancelDelete">
+                    <span class="bi bi-x-lg" aria-hidden="true"></span> Batal
+                </button>
+                <button type="button" class="btn-delete" @onclick="ConfirmDelete">
+                    <span class="bi bi-trash-fill" aria-hidden="true"></span> Hapus
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="agent-page @(ShowThemePopup ? "agent-page-blurred" : "")">
+    <img src="images/gs-battery-icon.png" class="watermark" alt="" aria-hidden="true" />
+
+    <div class="agent-inner">
+        @* Agent header *@
+        <div class="agent-header">
+            <div>
+                <h1 class="agent-title">Agent Core Value</h1>
+
+                <div class="theme-select-row">
+                    <label class="theme-select-label" for="theme-select">Tema Tahun Ini</label>
+                    <select id="theme-select" class="theme-select" @onchange="OnThemeChanged">
+                        @foreach (var theme in Enum.GetValues<CoreValueTheme>())
+                        {
+                            <option value="@theme" selected="@(theme == AgentStore.CurrentTheme)">@theme.DisplayName()</option>
+                        }
+                    </select>
+                    <button type="button" class="link-btn" @onclick="() => ShowThemePopup = true">lihat tema</button>
+                </div>
+
+                <p class="agent-sub">@Agents.Count agent</p>
+            </div>
+            <button type="button" class="btn-add" @onclick="OpenAddForm">
+                <span class="bi bi-plus-lg" aria-hidden="true"></span> Tambah Agent
+            </button>
+        </div>
+
+        @* Shared add/edit form *@
+        @if (FormVisible)
+        {
+            <div class="agent-form-card">
+                <h2 class="agent-form-title">@(IsEditing ? "Edit Agent" : "Tambah Agent Baru")</h2>
+
+                <EditForm Model="FormModel" OnValidSubmit="HandleSave">
+                    <DataAnnotationsValidator />
+
+                    @if (FormError is not null)
+                    {
+                        <div class="field-error agent-form-error">@FormError</div>
+                    }
+
+                    <div class="agent-form-grid">
+                        <div class="field-group">
+                            <label class="field-label">NIM</label>
+                            <InputText class="field-input" @bind-Value="FormModel.Id" maxlength="6" disabled="@IsEditing" />
+                            <ValidationMessage For="() => FormModel.Id" class="field-error" />
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">Nama</label>
+                            <InputText class="field-input" @bind-Value="FormModel.Name" maxlength="100" />
+                            <ValidationMessage For="() => FormModel.Name" class="field-error" />
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">Department</label>
+                            <InputText class="field-input" @bind-Value="FormModel.Department" maxlength="100" />
+                            <ValidationMessage For="() => FormModel.Department" class="field-error" />
+                        </div>
+                    </div>
+
+                    <div class="agent-form-actions">
+                        <button type="button" class="btn-cancel" @onclick="CloseForm">
+                            <span class="bi bi-x-lg" aria-hidden="true"></span> Batal
+                        </button>
+                        <button type="submit" class="btn-submit">@(IsEditing ? "Simpan Perubahan" : "Tambah Agent")</button>
+                    </div>
+                </EditForm>
+            </div>
+        }
+        
+        @* Roster for the active theme *@
+        <div class="table-wrap">
+            <table class="submissions-table">
+                <thead>
+                    <tr>
+                        <th>NIM</th>
+                        <th>Nama</th>
+                        <th>Department</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (!Agents.Any())
+                    {
+                        <tr><td colspan="4" class="empty-cell">Belum ada agent</td></tr>
+                    }
+                    @foreach (var agent in Agents)
+                    {
+                        <tr>
+                            <td class="cell-nowrap">@agent.Id</td>
+                            <td class="cell-nowrap">@agent.Name</td>
+                            <td class="cell-nowrap">@agent.Department</td>
+                            <td class="cell-nowrap agent-row-actions">
+                                <button type="button" class="icon-btn" title="Edit" @onclick="() => OpenEditForm(agent)">
+                                    <span class="bi bi-pencil-fill" aria-hidden="true"></span>
+                                </button>
+                                <button type="button" class="icon-btn icon-btn-danger" title="Hapus" @onclick="() => RequestDelete(agent)">
+                                    <span class="bi bi-trash-fill" aria-hidden="true"></span>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@if (ShowThemePopup)
+{
+    <div class="modal-backdrop-custom" @onclick="DismissPopup">
+        <div class="theme-popup">
+            <img src="images/coreValue-@(AgentStore.CurrentTheme.ImageSlug()).png"
+                 alt="@AgentStore.CurrentTheme.DisplayName()" class="theme-popup-image" />
+            <div class="theme-popup-footer">
+                <div>
+                    <div class="theme-popup-label">Tema Core Value Tahun Ini</div>
+                    <div class="theme-popup-name">@AgentStore.CurrentTheme.DisplayName()</div>
+                </div>
+                <span class="theme-popup-hint">Klik di mana saja untuk menutup</span>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // Theme banner is shown on first visit so users are aware of the active theme
+    private bool ShowThemePopup = true;
+
+    // Local projection of the store current roster sorted for display
+    private List<PicRecord> Agents = new();
+
+    // Form state
+    private bool FormVisible;
+    private bool IsEditing;
+    private string? OriginalId;
+    private string? FormError;
+    private PicRecord? AgentPendingDelete;
+    private AgentFormModel FormModel = new();
+
+    protected override void OnInitialized()
+    {
+        RefreshAgents();
+        AgentStore.Changed += OnStoreChanged;
+    }
+
+    /// Store change handler
+    private void OnStoreChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            RefreshAgents();
+            StateHasChanged();
+        });
+    }
+
+    /// Pulls the active themes agents and orders them by name
+    private void RefreshAgents()
+        => Agents = AgentStore.GetCurrentAgents().OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// Switches the active theme and reopens the banner to confirm the change
+    private void OnThemeChanged(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<CoreValueTheme>(e.Value?.ToString(), out var theme))
+        {
+            AgentStore.SetCurrentTheme(theme);
+            ShowThemePopup = true;
+        }
+    }
+
+    private void DismissPopup() => ShowThemePopup = false;
+
+    /// Resets the form to "add" mode with a blank model and no stale errors
+    private void OpenAddForm()
+    {
+        IsEditing = false;
+        OriginalId = null;
+        FormModel = new AgentFormModel();
+        FormError = null;
+        FormVisible = true;
+    }
+
+    /// Prefills the form with the selected agent and switches to edit mode
+    private void OpenEditForm(PicRecord agent)
+    {
+        IsEditing = true;
+        OriginalId = agent.Id;
+        FormModel = new AgentFormModel { Id = agent.Id, Name = agent.Name, Department = agent.Department };
+        FormError = null;
+        FormVisible = true;
+    }
+
+    private void CloseForm()
+    {
+        FormVisible = false;
+        FormError = null;
+    }
+
+    private void HandleSave()
+    {
+        var record = new PicRecord(FormModel.Id.Trim(), FormModel.Name.Trim(), FormModel.Department.Trim());
+
+        var success = IsEditing
+            ? AgentStore.TryUpdate(OriginalId!, record)
+            : AgentStore.TryAdd(record);
+
+        if (!success)
+        {
+            FormError = IsEditing
+                ? "Gagal menyimpan perubahan. NIM mungkin sudah dipakai agent lain."
+                : "NIM ini sudah terdaftar.";
+            return;
+        }
+
+        FormVisible = false;
+    }
+
+    private void RequestDelete(PicRecord agent) => AgentPendingDelete = agent;
+
+    private void CancelDelete() => AgentPendingDelete = null;
+
+    private void ConfirmDelete()
+    {
+        if (AgentPendingDelete is not null)
+        {
+            AgentStore.TryDelete(AgentPendingDelete.Id);
+            AgentPendingDelete = null;
+        }
+    }
+
+    /// Unsubscribes from the store to avoid leaking handlers per circuit
+    public void Dispose() => AgentStore.Changed -= OnStoreChanged;
+
+    /// Edit form model with data-annotation validation.
+    private class AgentFormModel
+    {
+        [Required(ErrorMessage = "NIM wajib diisi.")]
+        [RegularExpression(@"^\d{6}$", ErrorMessage = "NIM harus terdiri dari 6 digit angka.")]
+        public string Id { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nama wajib diisi.")]
+        [StringLength(100, ErrorMessage = "Nama maksimal 100 karakter.")]
+        public string Name { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Department wajib diisi.")]
+        [StringLength(100, ErrorMessage = "Department maksimal 100 karakter.")]
+        public string Department { get; set; } = string.Empty;
+    }
+}
+
+<style>
+    .modal-backdrop-custom {
+        position: fixed;
+        inset: 0;
+        z-index: 1050;
+        background: rgba(10, 10, 20, .55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+    }
+
+    .theme-popup {
+        width: 100%;
+        max-width: 40rem;
+        background: #fff;
+        border-radius: 1rem;
+        overflow: hidden;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
+    }
+
+    .theme-popup-image {
+        width: 100%;
+        display: block;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        background: #111;
+    }
+
+    .theme-popup-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 1.2rem 1.4rem;
+        flex-wrap: wrap;
+    }
+
+    .theme-popup-label {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .68rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: #8a8a8a;
+    }
+
+    .theme-popup-name {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: 1.05rem;
+        color: #1a1a1a;
+    }
+
+    .theme-popup {
+        cursor: pointer;
+    }
+
+    .theme-popup-hint {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .68rem;
+        color: #8a8a8a;
+        white-space: nowrap;
+    }
+
+    /* Page */
+    .agent-page {
+        position: relative;
+        min-height: calc(100vh - 6rem);
+        padding: 2rem 1.5rem 3rem;
+        overflow: hidden;
+        transition: filter .2s ease;
+    }
+
+    .agent-page-blurred {
+        filter: blur(6px);
+        pointer-events: none;
+        user-select: none;
+    }
+
+    .watermark {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 30rem;
+        height: auto;
+        transform: translate(-50%, -50%);
+        opacity: .08;
+        pointer-events: none;
+        user-select: none;
+    }
+
+    .agent-inner {
+        position: relative;
+        z-index: 1;
+        max-width: 72rem;
+        margin: 0 auto;
+    }
+
+    .agent-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 1.6rem;
+    }
+
+    .agent-title {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: 1.5rem;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        color: #1a1a1a;
+        margin-bottom: .3rem;
+    }
+
+    .agent-sub {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .78rem;
+        color: #6b6b6b;
+    }
+
+    .theme-select-row {
+        display: flex;
+        align-items: center;
+        gap: .6rem;
+        flex-wrap: wrap;
+        margin-bottom: .5rem;
+    }
+
+    .theme-select-label {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .7rem;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        color: #6b6b6b;
+    }
+
+    .theme-select {
+        border: 1px solid #d5d5d5;
+        border-radius: .5rem;
+        background: #fff;
+        padding: .4rem .7rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .78rem;
+        color: #1400f5;
+        cursor: pointer;
+    }
+
+    .theme-select:focus {
+        outline: none;
+        border-color: #1400f5;
+        box-shadow: 0 0 0 3px rgba(20, 0, 245, .12);
+    }
+
+    .link-btn {
+        background: none;
+        border: none;
+        padding: 0;
+        margin-left: .4rem;
+        color: #1400f5;
+        text-decoration: underline;
+        cursor: pointer;
+        font: inherit;
+    }
+
+    .btn-add {
+        display: inline-flex;
+        align-items: center;
+        gap: .5rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .8rem;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        padding: .7rem 1.3rem;
+        border-radius: .6rem;
+        border: none;
+        background: #1400f5;
+        color: #fff;
+        cursor: pointer;
+    }
+
+    .btn-add:hover {
+        background: #1000c4;
+    }
+
+    /* Form card */
+    .agent-form-card {
+        background: #f5f5f5;
+        border: 1px solid #e5e5e5;
+        border-radius: .9rem;
+        padding: 1.4rem;
+        margin-bottom: 1.6rem;
+    }
+
+    .agent-form-title {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .9rem;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        color: #1a1a1a;
+        margin-bottom: 1rem;
+    }
+
+    .agent-form-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .field-group {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .field-label {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .72rem;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        color: #1a1a1a;
+        margin-bottom: .35rem;
+    }
+
+    .field-input {
+        border: 1px solid #d5d5d5;
+        border-radius: .6rem;
+        background: #fff;
+        padding: .65rem .85rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .82rem;
+        color: #1a1a1a;
+    }
+
+    .field-input:disabled {
+        background: #ececec;
+        color: #8a8a8a;
+    }
+
+    .field-input:focus {
+        outline: none;
+        border-color: #1400f5;
+        box-shadow: 0 0 0 3px rgba(20, 0, 245, .12);
+    }
+
+    .field-error {
+        margin-top: .3rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .7rem;
+        color: #e2222e;
+        display: block;
+    }
+
+    .agent-form-error {
+        margin-top: 0;
+        margin-bottom: .8rem;
+    }
+
+    .agent-form-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: .7rem;
+    }
+
+    .btn-cancel, .btn-submit, .btn-delete {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .78rem;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        padding: .65rem 1.3rem;
+        border-radius: .6rem;
+        border: 1px solid transparent;
+        cursor: pointer;
+    }
+
+    .btn-cancel {
+        background: #fff;
+        border-color: #d5d5d5;
+        color: #1a1a1a;
+    }
+
+    .btn-cancel:hover {
+        background: #f2f2f2;
+    }
+
+    .btn-submit {
+        background: #1400f5;
+        color: #fff;
+    }
+
+    .btn-submit:hover {
+        background: #1000c4;
+    }
+
+    .btn-delete {
+        background: #e2222e;
+        color: #fff;
+    }
+
+    .btn-delete:hover {
+        background: #c21f2c;
+    }
+
+    /* Table (matches Dashboard.razor table styling) */
+    .table-wrap {
+        overflow-x: auto;
+        border: 1px solid #e5e5e5;
+        border-radius: .8rem;
+    }
+
+    .submissions-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .78rem;
+    }
+
+    .submissions-table thead th {
+        text-align: left;
+        background: #f5f5f5;
+        color: #6b6b6b;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        font-size: .68rem;
+        padding: .7rem .9rem;
+        border-bottom: 1px solid #e5e5e5;
+        white-space: nowrap;
+    }
+
+    .submissions-table tbody td {
+        padding: .7rem .9rem;
+        border-bottom: 1px solid #f0f0f0;
+        color: #1a1a1a;
+        vertical-align: middle;
+    }
+
+    .submissions-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .submissions-table tbody tr:hover {
+        background: #fafaff;
+    }
+
+    .cell-nowrap {
+        white-space: nowrap;
+    }
+
+    .empty-cell {
+        text-align: center;
+        color: #8a8a8a;
+        padding: 1.5rem !important;
+    }
+
+    .agent-row-actions {
+        display: flex;
+        gap: .4rem;
+    }
+
+    .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: .5rem;
+        border: 1px solid #e5e5e5;
+        background: #fff;
+        color: #4a4a4a;
+        cursor: pointer;
+    }
+
+    .icon-btn:hover {
+        background: #f2f2ff;
+        color: #1400f5;
+        border-color: #1400f5;
+    }
+
+    .icon-btn-danger:hover {
+        background: #fdecec;
+        color: #e2222e;
+        border-color: #e2222e;
+    }
+
+    /* Delete confirmation */
+    .confirm-card {
+        width: 100%;
+        max-width: 22rem;
+        background: #fff;
+        border-radius: .9rem;
+        padding: 1.4rem;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
+    }
+
+    .confirm-text {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: .85rem;
+        color: #1a1a1a;
+        margin-bottom: 1.2rem;
+    }
+
+    @@media (max-width: 640px) {
+        .agent-form-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
