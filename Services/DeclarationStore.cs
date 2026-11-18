@@ -3,7 +3,7 @@ public record DeclarationRecord(
     string PicId,
     string PicName,
     string Department,
-    string SafetyDeclaration,
+    string ValueMoment,
     string ValueDeclaration,
     string? PhotoFileName,
     string? VideoFileName,

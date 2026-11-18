@@ -2,14 +2,17 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @implements IDisposable
+@implements IAsyncDisposable
 @using System.ComponentModel.DataAnnotations
 @using System.Text
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
 @using main.Services
 @inject NavigationManager NavigationManager
 @inject DeclarationStore DeclarationStore
 @inject AgentStore AgentStore
+@inject IJSRuntime JS
 
 <PageTitle>Form Value & Agent Declaration</PageTitle>
 
@@ -78,11 +81,11 @@
                     </div>
 
                     <div class="field-group">
-                        <label class="field-label">3. Safety Declaration <span class="req">*</span></label>
+                        <label class="field-label">3. Value Moment <span class="req">*</span></label>
                         <InputTextArea class="field-textarea" rows="7" maxlength="2000"
-                                       @bind-Value="FormModel.SafetyDeclaration"
-                                       placeholder="Tuliskan safety declaration..." />
-                        <ValidationMessage For="() => FormModel.SafetyDeclaration" class="field-error" />
+                                       @bind-Value="FormModel.ValueMoment"
+                                       placeholder="Tuliskan value moment..." />
+                        <ValidationMessage For="() => FormModel.ValueMoment" class="field-error" />
                     </div>
 
                 </div>
@@ -94,11 +97,36 @@
                         <label class="field-label">4. Lampirkan Dokumen <span class="req">*</span></label>
                         <div class="attach-row">
 
-                            <label class="attach-box @(PhotoPreviewUrl is not null ? "attach-box-filled" : "")">
-                                <InputFile class="attach-input" accept="image/*" capture="environment" OnChange="OnPhotoSelected" />
+                            <!-- Box Photo Function -->
+                            <div class="attach-box @(PhotoPreviewUrl is not null || IsPhotoCameraOpen ? "attach-box-filled" : "")"
+                                 @onclick="OnPhotoBoxClicked">
                                 @if (IsPhotoProcessing)
                                 {
-                                    <span class="attach-caption">Memproses...</span>
+                                    <span class="attach-caption">Memproses foto...</span>
+                                }
+                                else if (IsPhotoCameraOpen)
+                                {
+                                    <video id="photo-camera-live" class="attach-preview" autoplay playsinline muted></video>
+                                    @if (IsPhotoCameraStarting)
+                                    {
+                                        <div class="camera-loading-overlay">
+                                            <span class="attach-caption text-white">Meminta akses kamera...</span>
+                                        </div>
+                                    }
+                                    <div class="camera-top-actions" @onclick:stopPropagation="true">
+                                        <button type="button" class="camera-icon-btn" @onclick="SwitchPhotoCameraAsync" title="Ganti Kamera" aria-label="Ganti kamera foto">
+                                            <span class="bi bi-arrow-repeat"></span>
+                                        </button>
+                                        <button type="button" class="camera-icon-btn camera-icon-btn-danger" @onclick="ClosePhotoCameraAsync" title="Tutup Kamera" aria-label="Tutup kamera foto">
+                                            <span class="bi bi-x-lg"></span>
+                                        </button>
+                                    </div>
+                                    <div class="camera-bottom-actions" @onclick:stopPropagation="true">
+                                        <button type="button" class="camera-action-btn camera-capture-btn" @onclick="CapturePhotoAsync" disabled="@IsPhotoCameraStarting">
+                                            <span class="bi bi-camera-fill"></span>
+                                            <span>Ambil Foto</span>
+                                        </button>
+                                    </div>
                                 }
                                 else if (PhotoPreviewUrl is not null)
                                 {
@@ -113,17 +141,62 @@
                                     <span class="bi bi-camera-fill attach-icon"></span>
                                     <span class="attach-caption">Tap untuk mengambil foto</span>
                                 }
-                            </label>
+                            </div>
 
-                            <label class="attach-box @(VideoPreviewUrl is not null ? "attach-box-filled" : "")">
-                                <InputFile class="attach-input" accept="video/*" capture="environment" OnChange="OnVideoSelected" />
+                            <!-- Box Video Function -->
+                            <div class="attach-box @(VideoPreviewUrl is not null || IsVideoCameraOpen ? "attach-box-filled" : "")"
+                                 @onclick="OnVideoBoxClicked">
                                 @if (IsVideoProcessing)
                                 {
-                                    <span class="attach-caption">Memproses...</span>
+                                    <span class="attach-caption">Memproses video...</span>
+                                }
+                                else if (IsVideoCameraOpen)
+                                {
+                                    <video id="video-camera-live" class="attach-preview" autoplay playsinline muted></video>
+                                    @if (IsVideoCameraStarting)
+                                    {
+                                        <div class="camera-loading-overlay">
+                                            <span class="attach-caption text-white">Meminta akses kamera...</span>
+                                        </div>
+                                    }
+                                    @if (IsVideoRecording)
+                                    {
+                                        <div class="camera-rec-badge" @onclick:stopPropagation="true">
+                                            <span class="rec-dot"></span>
+                                            <span>REC @FormatDuration(VideoRecordingSeconds)</span>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="camera-top-actions" @onclick:stopPropagation="true">
+                                            <button type="button" class="camera-icon-btn" @onclick="SwitchVideoCameraAsync" title="Ganti Kamera" aria-label="Ganti kamera video">
+                                                <span class="bi bi-arrow-repeat"></span>
+                                            </button>
+                                            <button type="button" class="camera-icon-btn camera-icon-btn-danger" @onclick="CloseVideoCameraAsync" title="Tutup Kamera" aria-label="Tutup kamera video">
+                                                <span class="bi bi-x-lg"></span>
+                                            </button>
+                                        </div>
+                                    }
+                                    <div class="camera-bottom-actions" @onclick:stopPropagation="true">
+                                        @if (!IsVideoRecording)
+                                        {
+                                            <button type="button" class="camera-action-btn camera-record-btn" @onclick="StartVideoRecordingAsync" disabled="@IsVideoCameraStarting">
+                                                <span class="bi bi-record-circle-fill"></span>
+                                                <span>Mulai Rekam</span>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="camera-action-btn camera-stop-btn" @onclick="StopVideoRecordingAsync">
+                                                <span class="bi bi-stop-circle-fill"></span>
+                                                <span>Selesai Rekam</span>
+                                            </button>
+                                        }
+                                    </div>
                                 }
                                 else if (VideoPreviewUrl is not null)
                                 {
-                                    <video src="@VideoPreviewUrl" class="attach-preview" muted playsinline controls></video>
+                                    <video src="@VideoPreviewUrl" class="attach-preview" muted playsinline controls @onclick:stopPropagation="true"></video>
                                     <button type="button" class="attach-remove" @onclick="RemoveVideo" @onclick:preventDefault="true" @onclick:stopPropagation="true" aria-label="Hapus video">
                                         <span class="bi bi-x-lg"></span>
                                     </button>
@@ -134,7 +207,7 @@
                                     <span class="bi bi-camera-video-fill attach-icon"></span>
                                     <span class="attach-caption">Tap untuk mengambil video</span>
                                 }
-                            </label>
+                            </div>
 
                         </div>
                         @if (PhotoError is not null)
@@ -183,7 +256,7 @@
     private bool ShowPicSuggestions;
     private string? PicValidationError;
 
-    // Attachment state. Preview URLs are base64 data URIs generated client-side
+    // Attachment state. Preview URLs are base64 data URIs generated directly from the device camera stream
     private string? PhotoFileName;
     private string? VideoFileName;
     private string? PhotoPreviewUrl;
@@ -192,9 +265,24 @@
     private string? VideoError;
     private bool IsPhotoProcessing;
     private bool IsVideoProcessing;
-    private IBrowserFile? PhotoFile;
-    private IBrowserFile? VideoFile;
+    private bool HasPhotoAttachment => PhotoPreviewUrl is not null && PhotoFileName is not null;
+    private bool HasVideoAttachment => VideoPreviewUrl is not null && VideoFileName is not null;
     private bool ShowAttachmentError;
+
+    // Direct camera state (Photo & Video)
+    private IJSObjectReference? _cameraModule;
+    private bool IsPhotoCameraOpen;
+    private bool IsPhotoCameraStarting;
+    private string PhotoFacingMode = "environment";
+
+    private bool IsVideoCameraOpen;
+    private bool IsVideoCameraStarting;
+    private bool IsVideoRecording;
+    private string VideoFacingMode = "environment";
+    private int VideoRecordingSeconds;
+    private PeriodicTimer? _recordingTimer;
+    private CancellationTokenSource? _recordingTimerCts;
+    private const int MaxVideoDurationSeconds = 120;
 
     /// Suggestions are derived
     private IEnumerable<PicRecord> FilteredPics =>
@@ -250,8 +338,93 @@
         ShowPicSuggestions = false;
     }
 
-    /// Reads the selected photo into memory, verifies its signature against the expected image formats, and builds a preview data URI
-    private async Task OnPhotoSelected(InputFileChangeEventArgs e)
+    /// Ensures the self-contained camera JS module is loaded in the browser
+    private async ValueTask<IJSObjectReference> GetCameraModuleAsync()
+    {
+        if (_cameraModule is not null)
+        {
+            return _cameraModule;
+        }
+
+        var dataUri = $"data:text/javascript;charset=utf-8,{Uri.EscapeDataString(CameraJsModuleSource)}";
+        _cameraModule = await JS.InvokeAsync<IJSObjectReference>("import", dataUri);
+        return _cameraModule;
+    }
+
+    /// Triggered when the user clicks the Photo box
+    private async Task OnPhotoBoxClicked()
+    {
+        if (IsPhotoCameraOpen || IsPhotoProcessing || PhotoPreviewUrl is not null)
+        {
+            return;
+        }
+
+        await OpenPhotoCameraAsync();
+    }
+
+    /// Opens the device camera for taking a photo and requests camera permission
+    private async Task OpenPhotoCameraAsync()
+    {
+        PhotoError = null;
+
+        if (IsVideoCameraOpen)
+        {
+            await CloseVideoCameraAsync();
+        }
+
+        IsPhotoCameraOpen = true;
+        IsPhotoCameraStarting = true;
+        StateHasChanged();
+
+        try
+        {
+            var module = await GetCameraModuleAsync();
+            var result = await module.InvokeAsync<CameraStartResult>("startCamera", "photo", "photo-camera-live", PhotoFacingMode, false);
+            if (!result.Success)
+            {
+                PhotoError = result.Error ?? "Gagal mengakses kamera perangkat.";
+                IsPhotoCameraOpen = false;
+            }
+        }
+        catch (Exception)
+        {
+            PhotoError = "Tidak dapat membuka kamera perangkat. Pastikan izin kamera diaktifkan pada browser.";
+            IsPhotoCameraOpen = false;
+        }
+        finally
+        {
+            IsPhotoCameraStarting = false;
+            StateHasChanged();
+        }
+    }
+
+    /// Switches between front and rear camera for photo mode
+    private async Task SwitchPhotoCameraAsync()
+    {
+        PhotoFacingMode = PhotoFacingMode == "environment" ? "user" : "environment";
+        await OpenPhotoCameraAsync();
+    }
+
+    /// Closes the active photo camera stream
+    private async Task ClosePhotoCameraAsync()
+    {
+        IsPhotoCameraOpen = false;
+        IsPhotoCameraStarting = false;
+
+        if (_cameraModule is not null)
+        {
+            try
+            {
+                await _cameraModule.InvokeVoidAsync("stopCamera", "photo");
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
+    /// Captures a photo frame directly from the live camera stream into memory without saving to device disk
+    private async Task CapturePhotoAsync()
     {
         PhotoError = null;
         IsPhotoProcessing = true;
@@ -259,79 +432,253 @@
 
         try
         {
+            var module = await GetCameraModuleAsync();
+            await using var streamRef = await module.InvokeAsync<IJSStreamReference?>("capturePhotoStream", "photo", "photo-camera-live");
+            if (streamRef is null)
+            {
+                PhotoError = "Gagal mengambil foto dari kamera.";
+                return;
+            }
+
             const long maxSize = 8 * 1024 * 1024; // 8 MB
-            var bytes = await ReadAllBytesAsync(e.File, maxSize);
+            var bytes = await ReadAllBytesAsync(streamRef, maxSize);
             var detectedMimeType = DetectImageMimeType(bytes);
             if (detectedMimeType is null)
             {
-                PhotoError = "File tidak dikenali sebagai foto yang valid (JPEG/PNG/GIF/WebP)";
-                PhotoFile = null;
-                PhotoFileName = null;
-                PhotoPreviewUrl = null;
+                PhotoError = "Hasil tangkapan kamera tidak dikenali sebagai foto yang valid (JPEG/PNG/WebP)";
                 return;
             }
 
             PhotoPreviewUrl = $"data:{detectedMimeType};base64,{Convert.ToBase64String(bytes)}";
-            PhotoFile = e.File;
-            PhotoFileName = SanitizeFileName(e.File.Name);
+            PhotoFileName = SanitizeFileName($"foto_{DateTime.Now:yyyyMMdd_HHmmss}.jpg");
             ShowAttachmentError = false;
+            IsPhotoCameraOpen = false;
         }
         catch (IOException)
         {
             PhotoError = "Ukuran foto terlalu besar (maks 8 MB)";
-            PhotoFile = null;
-            PhotoFileName = null;
-            PhotoPreviewUrl = null;
+        }
+        catch (Exception)
+        {
+            PhotoError = "Terjadi kesalahan saat mengambil foto dari kamera.";
         }
         finally
         {
             IsPhotoProcessing = false;
+            StateHasChanged();
         }
     }
 
-    /// Video counterpart of <see cref="OnPhotoSelected"/>. Uses a larger size cap (40 MB) and verifies the container signature before showing a preview
-    private async Task OnVideoSelected(InputFileChangeEventArgs e)
+    /// Triggered when the user clicks the Video box
+    private async Task OnVideoBoxClicked()
+    {
+        if (IsVideoCameraOpen || IsVideoProcessing || VideoPreviewUrl is not null)
+        {
+            return;
+        }
+
+        await OpenVideoCameraAsync();
+    }
+
+    /// Opens the device camera (and microphone) for recording video and requests permission
+    private async Task OpenVideoCameraAsync()
     {
         VideoError = null;
+
+        if (IsPhotoCameraOpen)
+        {
+            await ClosePhotoCameraAsync();
+        }
+
+        IsVideoCameraOpen = true;
+        IsVideoCameraStarting = true;
+        IsVideoRecording = false;
+        StateHasChanged();
+
+        try
+        {
+            var module = await GetCameraModuleAsync();
+            var result = await module.InvokeAsync<CameraStartResult>("startCamera", "video", "video-camera-live", VideoFacingMode, true);
+            if (!result.Success)
+            {
+                VideoError = result.Error ?? "Gagal mengakses kamera perangkat untuk video.";
+                IsVideoCameraOpen = false;
+            }
+        }
+        catch (Exception)
+        {
+            VideoError = "Tidak dapat membuka kamera perangkat. Pastikan izin kamera diaktifkan pada browser.";
+            IsVideoCameraOpen = false;
+        }
+        finally
+        {
+            IsVideoCameraStarting = false;
+            StateHasChanged();
+        }
+    }
+
+    /// Switches between front and rear camera for video mode (when not actively recording)
+    private async Task SwitchVideoCameraAsync()
+    {
+        if (IsVideoRecording)
+        {
+            return;
+        }
+
+        VideoFacingMode = VideoFacingMode == "environment" ? "user" : "environment";
+        await OpenVideoCameraAsync();
+    }
+
+    /// Closes the active video camera stream and cancels any ongoing recording
+    private async Task CloseVideoCameraAsync()
+    {
+        StopRecordingTimer();
+        IsVideoRecording = false;
+        IsVideoCameraOpen = false;
+        IsVideoCameraStarting = false;
+
+        if (_cameraModule is not null)
+        {
+            try
+            {
+                await _cameraModule.InvokeVoidAsync("stopCamera", "video");
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
+    /// Starts recording video directly from the open camera stream using MediaRecorder
+    private async Task StartVideoRecordingAsync()
+    {
+        VideoError = null;
+
+        try
+        {
+            var module = await GetCameraModuleAsync();
+            var result = await module.InvokeAsync<CameraStartResult>("startVideoRecording", "video");
+            if (!result.Success)
+            {
+                VideoError = result.Error ?? "Gagal memulai perekaman video.";
+                return;
+            }
+
+            IsVideoRecording = true;
+            VideoRecordingSeconds = 0;
+            StartRecordingTimer();
+            StateHasChanged();
+        }
+        catch (Exception)
+        {
+            VideoError = "Tidak dapat memulai perekaman video pada perangkat ini.";
+        }
+    }
+
+    /// Stops recording, closes the camera stream, and attaches the recorded video directly in memory
+    private async Task StopVideoRecordingAsync()
+    {
+        if (!IsVideoRecording)
+        {
+            return;
+        }
+
+        StopRecordingTimer();
+        IsVideoRecording = false;
         IsVideoProcessing = true;
         StateHasChanged();
 
         try
         {
+            var module = await GetCameraModuleAsync();
+            await using var streamRef = await module.InvokeAsync<IJSStreamReference?>("stopVideoRecordingStream", "video");
+            if (streamRef is null)
+            {
+                VideoError = "Gagal memproses hasil rekaman video.";
+                IsVideoCameraOpen = false;
+                return;
+            }
+
             const long maxSize = 40 * 1024 * 1024; // 40 MB
-            var bytes = await ReadAllBytesAsync(e.File, maxSize);
+            var bytes = await ReadAllBytesAsync(streamRef, maxSize);
 
             var detectedMimeType = DetectVideoMimeType(bytes);
             if (detectedMimeType is null)
             {
-                VideoError = "File tidak dikenali sebagai video yang valid (MP4/WebM/MOV/AVI)";
-                VideoFile = null;
-                VideoFileName = null;
-                VideoPreviewUrl = null;
+                VideoError = "Hasil rekaman tidak dikenali sebagai format video yang valid (MP4/WebM)";
+                IsVideoCameraOpen = false;
                 return;
             }
 
+            var extension = detectedMimeType == "video/mp4" ? "mp4" : "webm";
             VideoPreviewUrl = $"data:{detectedMimeType};base64,{Convert.ToBase64String(bytes)}";
-            VideoFile = e.File;
-            VideoFileName = SanitizeFileName(e.File.Name);
+            VideoFileName = SanitizeFileName($"video_{DateTime.Now:yyyyMMdd_HHmmss}.{extension}");
             ShowAttachmentError = false;
+            IsVideoCameraOpen = false;
         }
         catch (IOException)
         {
-            VideoError = "Ukuran video terlalu besar (maks 40 MB)";
-            VideoFile = null;
-            VideoFileName = null;
-            VideoPreviewUrl = null;
+            VideoError = "Ukuran rekaman video terlalu besar (maks 40 MB)";
+            IsVideoCameraOpen = false;
+        }
+        catch (Exception)
+        {
+            VideoError = "Terjadi kesalahan saat menyimpan rekaman video.";
+            IsVideoCameraOpen = false;
         }
         finally
         {
             IsVideoProcessing = false;
+            StateHasChanged();
         }
+    }
+
+    private void StartRecordingTimer()
+    {
+        StopRecordingTimer();
+        _recordingTimerCts = new CancellationTokenSource();
+        var token = _recordingTimerCts.Token;
+        _recordingTimer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                while (await _recordingTimer.WaitForNextTickAsync(token))
+                {
+                    VideoRecordingSeconds++;
+                    if (VideoRecordingSeconds >= MaxVideoDurationSeconds)
+                    {
+                        await StopVideoRecordingAsync();
+                        break;
+                    }
+                    StateHasChanged();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+    }
+
+    private void StopRecordingTimer()
+    {
+        _recordingTimerCts?.Cancel();
+        _recordingTimerCts?.Dispose();
+        _recordingTimerCts = null;
+        _recordingTimer?.Dispose();
+        _recordingTimer = null;
+    }
+
+    private static string FormatDuration(int totalSeconds)
+    {
+        var mins = totalSeconds / 60;
+        var secs = totalSeconds % 60;
+        return $"{mins:D2}:{secs:D2}";
     }
 
     private void RemovePhoto()
     {
-        PhotoFile = null;
         PhotoFileName = null;
         PhotoPreviewUrl = null;
         PhotoError = null;
@@ -339,14 +686,14 @@
 
     private void RemoveVideo()
     {
-        VideoFile = null;
         VideoFileName = null;
         VideoPreviewUrl = null;
         VideoError = null;
     }
-    private static async Task<byte[]> ReadAllBytesAsync(IBrowserFile file, long maxSizeBytes)
+
+    private static async Task<byte[]> ReadAllBytesAsync(IJSStreamReference streamRef, long maxSizeBytes)
     {
-        await using var stream = file.OpenReadStream(maxAllowedSize: maxSizeBytes);
+        await using var stream = await streamRef.OpenReadStreamAsync(maxAllowedSize: maxSizeBytes);
         using var memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
         return memoryStream.ToArray();
@@ -373,8 +720,12 @@
 
     private static string? DetectVideoMimeType(byte[] bytes)
     {
-        // MP4 / MOV: "ftyp" box at byte offset 4.
-        if (bytes.Length >= 8 && bytes[4] == 'f' && bytes[5] == 't' && bytes[6] == 'y' && bytes[7] == 'p')
+        // MP4 / MOV (ftyp / styp / moof / mdat box at byte offset 4).
+        if (bytes.Length >= 8 && (
+            (bytes[4] == 'f' && bytes[5] == 't' && bytes[6] == 'y' && bytes[7] == 'p') ||
+            (bytes[4] == 's' && bytes[5] == 't' && bytes[6] == 'y' && bytes[7] == 'p') ||
+            (bytes[4] == 'm' && bytes[5] == 'o' && bytes[6] == 'o' && bytes[7] == 'f') ||
+            (bytes[4] == 'm' && bytes[5] == 'd' && bytes[6] == 'a' && bytes[7] == 't')))
             return "video/mp4";
 
         // WebM / Matroska EBML header.
@@ -388,6 +739,7 @@
 
         return null;
     }
+
     private static string SanitizeFileName(string fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName))
@@ -422,17 +774,19 @@
         }
         FormModel.Department = pic.Department;
 
-        if (PhotoFile is null && VideoFile is null)
+        if (!HasPhotoAttachment && !HasVideoAttachment)
         {
             ShowAttachmentError = true;
             return;
         }
 
+        await StopAllCamerasAsync();
+
         DeclarationStore.Add(new DeclarationRecord(
             PicId: pic.Id,
             PicName: pic.Name,
             Department: pic.Department,
-            SafetyDeclaration: FormModel.SafetyDeclaration,
+            ValueMoment: FormModel.ValueMoment,
             ValueDeclaration: FormModel.ValueDeclaration,
             PhotoFileName: PhotoFileName,
             VideoFileName: VideoFileName,
@@ -441,10 +795,61 @@
         NavigationManager.NavigateTo("/");
     }
 
-    private void GoBack() => NavigationManager.NavigateTo("/");
+    private async Task GoBack()
+    {
+        await StopAllCamerasAsync();
+        NavigationManager.NavigateTo("/");
+    }
 
-    /// Unsubscribes from the agent store to release the event handler
-    public void Dispose() => AgentStore.Changed -= OnAgentStoreChanged;
+    private async Task StopAllCamerasAsync()
+    {
+        StopRecordingTimer();
+        IsPhotoCameraOpen = false;
+        IsVideoCameraOpen = false;
+        IsVideoRecording = false;
+
+        if (_cameraModule is not null)
+        {
+            try
+            {
+                await _cameraModule.InvokeVoidAsync("stopAllStreams");
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
+    /// Unsubscribes from the agent store and releases timers
+    public void Dispose()
+    {
+        AgentStore.Changed -= OnAgentStoreChanged;
+        StopRecordingTimer();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        AgentStore.Changed -= OnAgentStoreChanged;
+        StopRecordingTimer();
+
+        if (_cameraModule is not null)
+        {
+            try
+            {
+                await _cameraModule.InvokeVoidAsync("stopAllStreams");
+                await _cameraModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
+    private sealed class CameraStartResult
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+    }
 
     private class DeclarationModel
     {
@@ -455,15 +860,204 @@
         [StringLength(120, ErrorMessage = "Department tidak valid")]
         public string Department { get; set; } = string.Empty;
 
-        [Required(ErrorMessage = "Safety Declaration wajib diisi")]
-        [StringLength(2000, ErrorMessage = "Safety Declaration maksimal 2000 karakter")]
-        public string SafetyDeclaration { get; set; } = string.Empty;
+        [Required(ErrorMessage = "Value Moment wajib diisi")]
+        [StringLength(2000, ErrorMessage = "Value Moment maksimal 2000 karakter")]
+        public string ValueMoment { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "Value Declaration wajib diisi")]
         [StringLength(2000, ErrorMessage = "Value Declaration maksimal 2000 karakter")]
         public string ValueDeclaration { get; set; } = string.Empty;
     }
 
+    private const string CameraJsModuleSource = @"
+const activeStreams = {};
+const activeRecorders = {};
+const recordedChunks = {};
+
+async function waitForVideoElement(elementId) {
+    for (let i = 0; i < 30; i++) {
+        const el = document.getElementById(elementId);
+        if (el) return el;
+        await new Promise(r => setTimeout(r, 25));
+    }
+    return null;
+}
+
+export async function startCamera(slot, elementId, facingMode, withAudio) {
+    await stopCamera(slot);
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        return {
+            success: false,
+            error: 'Browser perangkat ini tidak mendukung akses kamera langsung ( pastikan menggunakan HTTPS atau localhost ).'
+        };
+    }
+
+    let stream = null;
+    const videoConstraints = {
+        facingMode: { ideal: facingMode || 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+    };
+
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: Boolean(withAudio)
+        });
+    } catch (firstErr) {
+        try {
+            // Fallback jika kamera tidak mendukung facingMode tertentu atau mikrofon tidak tersedia
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: false
+            });
+        } catch (secondErr) {
+            const isDenied = secondErr && (secondErr.name === 'NotAllowedError' || secondErr.name === 'PermissionDeniedError');
+            return {
+                success: false,
+                error: isDenied
+                    ? 'Akses kamera ditolak. Silakan izinkan akses kamera pada pengaturan browser perangkat Anda.'
+                    : 'Kamera perangkat tidak ditemukan atau sedang digunakan oleh aplikasi lain.'
+            };
+        }
+    }
+
+    const videoEl = await waitForVideoElement(elementId);
+    if (!videoEl) {
+        stream.getTracks().forEach(t => t.stop());
+        return { success: false, error: 'Elemen pratinjau kamera tidak ditemukan.' };
+    }
+
+    activeStreams[slot] = stream;
+    videoEl.srcObject = stream;
+    videoEl.muted = true;
+    try {
+        await videoEl.play();
+    } catch (_) {
+    }
+
+    return { success: true, error: null };
+}
+
+export async function capturePhotoStream(slot, elementId) {
+    const videoEl = document.getElementById(elementId);
+    if (!videoEl) {
+        await stopCamera(slot);
+        return null;
+    }
+
+    const width = videoEl.videoWidth || 1280;
+    const height = videoEl.videoHeight || 720;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoEl, 0, 0, width, height);
+
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    await stopCamera(slot);
+    return blob;
+}
+
+function getSupportedVideoMimeType() {
+    const candidates = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4'
+    ];
+    for (const type of candidates) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
+            return type;
+        }
+    }
+    return '';
+}
+
+export async function startVideoRecording(slot) {
+    const stream = activeStreams[slot];
+    if (!stream) {
+        return { success: false, error: 'Kamera belum aktif.' };
+    }
+    if (typeof MediaRecorder === 'undefined') {
+        return { success: false, error: 'Perangkat tidak mendukung perekaman video langsung di browser.' };
+    }
+
+    recordedChunks[slot] = [];
+    const mimeType = getSupportedVideoMimeType();
+    const options = mimeType
+        ? { mimeType, videoBitsPerSecond: 2500000 }
+        : { videoBitsPerSecond: 2500000 };
+
+    let recorder;
+    try {
+        recorder = new MediaRecorder(stream, options);
+    } catch (_) {
+        recorder = new MediaRecorder(stream);
+    }
+
+    recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+            recordedChunks[slot].push(event.data);
+        }
+    };
+
+    activeRecorders[slot] = recorder;
+    recorder.start(250);
+    return { success: true, error: null };
+}
+
+export async function stopVideoRecordingStream(slot) {
+    const recorder = activeRecorders[slot];
+    if (!recorder) {
+        await stopCamera(slot);
+        return null;
+    }
+
+    const mimeType = recorder.mimeType || 'video/webm';
+    const blob = await new Promise((resolve) => {
+        recorder.onstop = () => {
+            const chunks = recordedChunks[slot] || [];
+            resolve(new Blob(chunks, { type: mimeType }));
+        };
+        if (recorder.state !== 'inactive') {
+            recorder.stop();
+        } else {
+            const chunks = recordedChunks[slot] || [];
+            resolve(new Blob(chunks, { type: mimeType }));
+        }
+    });
+
+    delete activeRecorders[slot];
+    delete recordedChunks[slot];
+    await stopCamera(slot);
+    return blob;
+}
+
+export async function stopCamera(slot) {
+    const recorder = activeRecorders[slot];
+    if (recorder && recorder.state !== 'inactive') {
+        try { recorder.stop(); } catch (_) {}
+    }
+    delete activeRecorders[slot];
+    delete recordedChunks[slot];
+
+    const stream = activeStreams[slot];
+    if (stream) {
+        stream.getTracks().forEach(t => {
+            try { t.stop(); } catch (_) {}
+        });
+        delete activeStreams[slot];
+    }
+}
+
+export async function stopAllStreams() {
+    await stopCamera('photo');
+    await stopCamera('video');
+}
+";
 }
 
 <style>
@@ -679,7 +1273,8 @@
         text-align: center;
         transition: border-color .15s ease, background .15s ease;
         overflow: hidden;
-        min-height: 8.5rem;
+        min-height: 10.5rem;
+        user-select: none;
     }
 
     .attach-box:hover {
@@ -689,21 +1284,155 @@
 
     .attach-box-filled {
         padding: 0;
+        cursor: default;
     }
 
     .attach-preview {
         width: 100%;
-        height: 8.5rem;
+        height: 10.5rem;
         object-fit: cover;
         display: block;
         background: #000;
+    }
+
+    .camera-loading-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, .55);
+        padding: .5rem;
+    }
+
+    .camera-top-actions {
+        position: absolute;
+        top: .45rem;
+        right: .45rem;
+        z-index: 3;
+        display: flex;
+        gap: .35rem;
+    }
+
+    .camera-icon-btn {
+        width: 1.85rem;
+        height: 1.85rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, .6);
+        color: #fff;
+        font-size: .78rem;
+        cursor: pointer;
+        transition: background .15s ease;
+    }
+
+    .camera-icon-btn:hover {
+        background: rgba(20, 0, 245, .85);
+    }
+
+    .camera-icon-btn-danger:hover {
+        background: rgba(226, 34, 46, .9);
+    }
+
+    .camera-bottom-actions {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 3;
+        display: flex;
+        justify-content: center;
+        padding: .5rem;
+        background: linear-gradient(0deg, rgba(0, 0, 0, .75), transparent);
+    }
+
+    .camera-action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        border: none;
+        border-radius: 999px;
+        padding: .38rem .95rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .68rem;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        color: #fff;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+    }
+
+    .camera-action-btn:disabled {
+        opacity: .55;
+        cursor: not-allowed;
+    }
+
+    .camera-capture-btn {
+        background: #1400f5;
+    }
+
+    .camera-capture-btn:hover:not(:disabled) {
+        background: #0f00b8;
+    }
+
+    .camera-record-btn {
+        background: #e2222e;
+    }
+
+    .camera-record-btn:hover:not(:disabled) {
+        background: #b81923;
+    }
+
+    .camera-stop-btn {
+        background: #1a1a1a;
+        border: 1px solid #fff;
+    }
+
+    .camera-stop-btn:hover {
+        background: #333;
+    }
+
+    .camera-rec-badge {
+        position: absolute;
+        top: .5rem;
+        left: .5rem;
+        z-index: 3;
+        display: inline-flex;
+        align-items: center;
+        gap: .35rem;
+        background: rgba(226, 34, 46, .9);
+        color: #fff;
+        border-radius: 999px;
+        padding: .2rem .6rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 700;
+        font-size: .65rem;
+        letter-spacing: .04em;
+    }
+
+    .rec-dot {
+        width: .45rem;
+        height: .45rem;
+        border-radius: 50%;
+        background: #fff;
+        animation: rec-pulse 1s infinite ease-in-out;
+    }
+
+    @@keyframes rec-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: .25; }
     }
 
     .attach-remove {
         position: absolute;
         top: .5rem;
         right: .5rem;
-        z-index: 2;
+        z-index: 3;
         width: 1.7rem;
         height: 1.7rem;
         display: inline-flex;
@@ -730,13 +1459,6 @@
         background: linear-gradient(0deg, rgba(0, 0, 0, .65), transparent);
         color: #fff;
         text-align: left;
-    }
-
-    .attach-input {
-        position: absolute;
-        inset: 0;
-        opacity: 0;
-        cursor: pointer;
     }
 
     .attach-icon {

@@ -116,7 +116,7 @@
                                 <th>NPK</th>
                                 <th>Nama PIC</th>
                                 <th>Department</th>
-                                <th>Safety Declaration</th>
+                                <th>Value Moment</th>
                                 <th>Value Declaration</th>
                                 <th>Lampiran</th>
                             </tr>
@@ -129,7 +129,7 @@
                                     <td class="cell-nowrap">@item.PicId</td>
                                     <td class="cell-nowrap">@item.PicName</td>
                                     <td class="cell-nowrap">@item.Department</td>
-                                    <td class="cell-truncate" title="@item.SafetyDeclaration">@item.SafetyDeclaration</td>
+                                    <td class="cell-truncate" title="@item.ValueMoment">@item.ValueMoment</td>
                                     <td class="cell-truncate" title="@item.ValueDeclaration">@item.ValueDeclaration</td>
                                     <td class="cell-nowrap">
                                         @if (item.PhotoFileName is not null)
@@ -200,7 +200,7 @@
     /// Aggregated submission total for one PIC in the recap table
     private record PicTotal(string PicId, string PicName, int Count);
 
-    /// <summary>Formats a month key as an Indonesian long month plus year.</summary>
+    /// Formats a month key as an Indonesian long month plus years
     private static string FormatMonth(DateOnly month) =>
         month.ToDateTime(TimeOnly.MinValue).ToString("MMMM yyyy", CultureInfo.GetCultureInfo("id-ID"));
 

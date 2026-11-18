@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/BGuide/main/main.csproj": {}
+    "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/coreValue-ManagementSystem/main.csproj": {}
   },
   "projects": {
-    "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/BGuide/main/main.csproj": {
+    "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/coreValue-ManagementSystem/main.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/BGuide/main/main.csproj",
+        "projectUniqueName": "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/coreValue-ManagementSystem/main.csproj",
         "projectName": "main",
-        "projectPath": "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/BGuide/main/main.csproj",
-        "packagesPath": "/Volumes/flashdrive.ghxfarr/DeveloperCache/.nuget-packages",
-        "outputPath": "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/BGuide/main/obj/",
+        "projectPath": "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/coreValue-ManagementSystem/main.csproj",
+        "packagesPath": "/Users/wandernofficial/.nuget/packages/",
+        "outputPath": "/Volumes/flashdrive.ghxfarr/ghxfarr/Development/Agile-DevOps/coreValue-ManagementSystem/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "/Users/wandernofficial/.nuget/NuGet/NuGet.Config"
